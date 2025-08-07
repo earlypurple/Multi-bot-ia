@@ -33,24 +33,36 @@ def router(state):
 # Routes vers les agents spécialisés
 async def call_agent(agent_name: str, query: str):
     agent_urls = {
-        "cuisine": "https://earlypurple-agent-cuisine.hf.space/handle",
-        "tradeur": "https://earlypurple-agent-tradeur.hf.space/handle", 
-        "cannabis": "https://earlypurple-agent-cannabis.hf.space/handle",
-        "geo": "https://earlypurple-agent-geo.hf.space/handle",
-        "med": "https://earlypurple-agent-med.hf.space/handle"
+        "cuisine": os.getenv("AGENT_CUISINE_URL", "https://earlypurple-agent-cuisine.hf.space/handle"),
+        "tradeur": os.getenv("AGENT_TRADEUR_URL", "https://earlypurple-agent-tradeur.hf.space/handle"),
+        "cannabis": os.getenv("AGENT_CANNABIS_URL", "https://earlypurple-agent-cannabis.hf.space/handle"),
+        "geo": os.getenv("AGENT_GEO_URL", "https://earlypurple-agent-geo.hf.space/handle"),
+        "med": os.getenv("AGENT_MED_URL", "https://earlypurple-agent-med.hf.space/handle")
     }
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(agent_urls[agent_name], 
-                                   json={"query": query})
-        return response.json()
+    url = agent_urls.get(agent_name)
+    if not url:
+        raise HTTPException(status_code=400, detail=f"Agent '{agent_name}' not found")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json={"query": query})
+            response.raise_for_status()  # Lève une exception pour les codes d'erreur HTTP
+            return response.json()
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=500, detail=f"Error while calling agent: {exc}")
 
 @app.post("/ask")
 async def orchestrate(q: Query):
-    # Router la requête
-    route = router(Hub(query=q.query))
-    result = await call_agent(route, q.query)
-    return {"route": route, "result": result}
+    try:
+        # Router la requête
+        route = router(Hub(query=q.query))
+        result = await call_agent(route, q.query)
+        return {"route": route, "result": result}
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 if __name__ == "__main__":
     import uvicorn
